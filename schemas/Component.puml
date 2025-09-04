@@ -1,0 +1,46 @@
+@startuml
+!define RELATIVE_INCLUDE ./lib
+!include RELATIVE_INCLUDE/C4_Component.puml
+title Smart Home (MVP) – Component Diagram
+
+Container_Boundary(api, "API/BFF (Go)") {
+  Component(api_http, "HTTPS Controllers", "Go", "REST эндпоинты: /auth, /devices, /telemetry(read), /commands")
+  Component(api_auth, "JWT Auth", "Go", "Выпуск/проверка JWT (упрощённо)")
+  Component(api_mapper, "DTO Mapper", "Go", "Маппинг DTO ⇄ Domain")
+  Component(api_clients, "Services Client", "Go", "HTTPS/REST клиент к Devices Service")
+}
+
+Container_Boundary(devs, "Devices Service (Go)") {
+  Component(dev_onb, "Onboarding Manager", "Go", "Создание устройств, claim-коды, выдача MQTT creds, ACL")
+  Component(dev_cmd, "Command Orchestrator", "Go", "Валидация и публикация команд в MQTT, статус доставки")
+  Component(dev_ing, "Telemetry Ingest", "Go", "Подписка на MQTT, парсинг, сохранение телеметрии")
+  Component(dev_q, "MQTT Client", "Go", "Pub/Sub (commands/telemetry), QoS, LWT")
+  Component(dev_repo, "Repositories", "Go + SQL", "Users/Devices/Telemetry/Commands")
+  Component(dev_rules, "Simple Rule Engine (opt)", "Go", "Триггеры по телеметрии → команды/уведомления")
+}
+
+System_Ext(bus, "MQTT Broker", "Mosquitto", "Pub/Sub телеметрии и команд")
+ContainerDb(db, "Postgres", "SQL", "Пользователи, устройства, телеметрия, команды")
+Container(web, "Web Client", "Vue", "UI (REST)")
+
+Rel(web, api_http, "HTTPS REST/JSON")
+Rel(api_http, api_auth, "Validate/Issue JWT")
+Rel(api_http, api_mapper, "Map DTOs")
+Rel(api_http, api_clients, "REST/gRPC calls")
+
+Rel(api_clients, dev_onb, "create/claim device")
+Rel(api_clients, dev_cmd, "send command")
+Rel(api_clients, dev_repo, "read telemetry (queries)")
+
+Rel(dev_q, dev_ing, "deliver messages (callback)")
+Rel(dev_ing, dev_repo, "store telemetry")
+Rel(dev_onb, dev_repo, "CRUD devices/credentials")
+Rel(dev_cmd, dev_q, "PUB commands/#")
+Rel(dev_q, bus, "MQTT TLS", "Pub/Sub")
+
+Rel(dev_repo, db, "SQL CRUD")
+
+Rel(dev_rules, dev_repo, "read events/telemetry")
+Rel(dev_rules, dev_cmd, "emit command")
+
+@enduml

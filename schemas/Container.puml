@@ -1,0 +1,30 @@
+@startuml
+!define RELATIVE_INCLUDE ./lib
+!include RELATIVE_INCLUDE/C4_Container.puml
+
+Person(user, "Пользователь")
+
+System_Boundary(sh,"Smart Home (MVP)") {
+  Container(web,  "Web Client", "Vue", "UI (REST)")
+  Container(api,  "API/BFF", "Go", "REST/JSON, простая JWT auth")
+  Container(devs, "Devices Service", "Go", "Онбординг, команды, ingest телеметрии")
+  Container(bus,  "MQTT Broker", "Mosquitto", "Pub/Sub телеметрии и команд")
+  ContainerDb(db, "Postgres", "PostgreSQL", "Пользователи, устройства, телеметрия")
+}
+
+' Пользовательский поток
+Rel(user, web, "Использует")
+Rel(web, api, "HTTPS REST/JSON")
+Rel(api, devs, "REST/JSON")
+
+' Интеграция устройств
+System_Ext(dev_wifi, "Smart devices", "MQTT over TLS")
+Rel(dev_wifi, bus, "Pub telemetry / Sub commands")
+
+' Сервис устройств ↔ брокер
+Rel(devs, bus, "Sub telemetry / Pub commands")
+
+' Персистентность
+Rel(devs, db, "CRUD (users/devices/telemetry)")
+
+@enduml
