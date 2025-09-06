@@ -13,22 +13,27 @@ import (
 )
 
 type TemperatureResponse struct {
-	Location    string  `json:"location"`
-	SensorID    string  `json:"sensorId"`
-	Temperature float64 `json:"temperature"`
-	Unit        string  `json:"unit"`
-	Timestamp   string  `json:"timestamp"`
+	Value       float64   `json:"value"`
+	Unit        string    `json:"unit"`
+	Timestamp   time.Time `json:"timestamp"`
+	Location    string    `json:"location"`
+	Status      string    `json:"status"`
+	SensorID    string    `json:"sensor_id"`
+	SensorType  string    `json:"sensor_type"`
+	Description string    `json:"description"`
 }
 
 func main() {
 	router := mux.NewRouter()
 
-	router.HandleFunc("/temperature", temperatureHandler).Methods("GET")
-
 	router.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"status":"ok","endpoints":["/temperature?location=Living Room","/temperature?sensorId=1"]}`))
-	}).Methods("GET")
+		w.Write([]byte(`{"status":"ok","endpoints":["/temperature?location=Living Room","/temperature?sensorId=1","/temperature/1"]}`))
+	}).Methods(http.MethodGet)
+
+	router.HandleFunc("/temperature", temperatureHandler).Methods(http.MethodGet)
+
+	router.HandleFunc("/temperature/{sensorId}", temperatureByIDHandler).Methods(http.MethodGet)
 
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -73,20 +78,61 @@ func temperatureHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	temp := genTemp(sensorID)
+
+	resp := TemperatureResponse{
+		Value:       round(temp, 1),
+		Unit:        "C",
+		Timestamp:   time.Now().UTC(),
+		Location:    location,
+		Status:      "ok",
+		SensorID:    sensorID,
+		SensorType:  "temperature",
+		Description: "Randomly generated temperature",
+	}
+
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+func temperatureByIDHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	vars := mux.Vars(r)
+	sensorID := vars["sensorId"]
+
+	location := "Unknown"
+	switch sensorID {
+	case "1":
+		location = "Living Room"
+	case "2":
+		location = "Bedroom"
+	case "3":
+		location = "Kitchen"
+	default:
+		sensorID = "0"
+	}
+
+	temp := genTemp(sensorID)
+
+	resp := TemperatureResponse{
+		Value:       round(temp, 1),
+		Unit:        "C",
+		Timestamp:   time.Now().UTC(),
+		Location:    location,
+		Status:      "ok",
+		SensorID:    sensorID,
+		SensorType:  "temperature",
+		Description: "Randomly generated temperature",
+	}
+
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+func genTemp(sensorID string) float64 {
 	base := 18.0 + rand.Float64()*10.0
 	sid, _ := strconv.Atoi(sensorID)
 	jitter := float64((sid%5)-2) * 0.1
-	temp := base + jitter
-
-	resp := TemperatureResponse{
-		Location:    location,
-		SensorID:    sensorID,
-		Temperature: round(temp, 1),
-		Unit:        "C",
-		Timestamp:   time.Now().UTC().Format(time.RFC3339),
-	}
-
-	json.NewEncoder(w).Encode(resp)
+	return base + jitter
 }
 
 func round(v float64, prec int) float64 {
