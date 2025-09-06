@@ -1,0 +1,78 @@
+@startuml
+title Smart Home (MVP) – ER Diagram
+
+entity "users" as users {
+  * id : uuid <<PK>>
+  --
+  email : text <<UK>>
+  password_hash : text
+  created_at : timestamptz
+}
+
+entity "homes" as homes {
+  * id : uuid <<PK>>
+  --
+  owner_id : uuid <<FK users.id>>
+  name : text
+  created_at : timestamptz
+}
+
+entity "user_home" as user_home {
+  * user_id : uuid <<FK users.id>>
+  * home_id : uuid <<FK homes.id>>
+  role : text  ' owner|member
+  created_at : timestamptz
+}
+
+entity "devices" as devices {
+  * id : uuid <<PK>>
+  --
+  home_id : uuid <<FK homes.id>>
+  name : text
+  type : text         ' enum DeviceType
+  status : text       ' enum DeviceStatus
+  last_seen : timestamptz
+  created_at : timestamptz
+}
+
+entity "device_credentials" as device_credentials {
+  * device_id : uuid <<PK, FK devices.id>>
+  --
+  mqtt_username : text
+  mqtt_password_hash : text
+  pub_topic : text
+  sub_topic : text
+  updated_at : timestamptz
+}
+
+entity "telemetry" as telemetry {
+  * id : uuid <<PK>>
+  --
+  device_id : uuid <<FK devices.id>>
+  metric : text
+  value : double precision
+  ts : timestamptz
+  tags : jsonb
+}
+
+entity "commands" as commands {
+  * id : uuid <<PK>>
+  --
+  device_id : uuid <<FK devices.id>>
+  name : text
+  payload : jsonb
+  status : text         ' enum CommandStatus
+  created_at : timestamptz
+  updated_at : timestamptz
+}
+
+
+users ||--o{ homes : owns
+users ||--o{ user_home : member_of
+homes ||--o{ user_home : has
+homes ||--o{ devices : contains
+devices ||--|| device_credentials : has
+devices ||--o{ telemetry : emits
+devices ||--o{ commands : receives
+
+@enduml

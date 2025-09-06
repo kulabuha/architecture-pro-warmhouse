@@ -1,0 +1,80 @@
+@startuml
+title Smart Home (MVP) – Class Diagram
+
+class User {
+  +uuid id
+  +string email
+  +string passwordHash
+  +time createdAt
+}
+
+class Home {
+  +uuid id
+  +string name
+  +uuid ownerId
+}
+
+class Device {
+  +uuid id
+  +uuid homeId
+  +string name
+  +DeviceType type
+  +DeviceStatus status
+  +time lastSeen
+}
+
+enum DeviceType {
+  Sensor
+  Relay
+  Switch
+  Thermostat
+  Custom
+}
+
+enum DeviceStatus {
+  New
+  Active
+  Suspended
+  Offline
+}
+
+class DeviceCredentials {
+  +uuid deviceId
+  +string mqttUsername
+  +string mqttPasswordHash
+  +string pubTopic
+  +string subTopic
+}
+
+class TelemetryPoint {
+  +uuid id
+  +uuid deviceId
+  +string metric
+  +double value
+  +time ts
+  +map<string,string> tags
+}
+
+class Command {
+  +uuid id
+  +uuid deviceId
+  +string name
+  +map<string,string> payload
+  +CommandStatus status
+  +time createdAt
+}
+
+enum CommandStatus {
+  Pending
+  Sent
+  Delivered
+  Failed
+  Expired
+}
+
+User "1" -- "0..*" Home : owns >
+Home "1" -- "0..*" Device : contains >
+Device "1" -- "0..1" DeviceCredentials : has >
+Device "1" -- "0..*" TelemetryPoint : emits >
+Device "1" -- "0..*" Command : receives >
+@enduml

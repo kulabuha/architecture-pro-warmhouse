@@ -1,0 +1,401 @@
+openapi: 3.0.4
+info:
+  title: Smart Home MVP API
+  version: 1.0.0
+  description: >
+    REST API для Smart Home (MVP): аутентификация, устройства, команды, телеметрия.
+    Устройства подключаются к MQTT брокеру отдельно (MQTT over TLS); этот API управляет онбордингом и чтением данных.
+
+servers:
+  - url: https://api.smarthome.local/api/v1
+
+tags:
+  - name: Auth
+  - name: Devices
+  - name: Telemetry
+  - name: Commands
+
+security:
+  - BearerAuth: []
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    IdempotencyKey:
+      type: apiKey
+      in: header
+      name: Idempotency-Key
+
+  schemas:
+    Problem:
+      type: object
+      description: RFC7807-like error
+      properties:
+        type: { type: string, format: uri }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+      required: [title, status]
+
+    UserLoginRequest:
+      type: object
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, format: password }
+      required: [email, password]
+
+    TokenResponse:
+      type: object
+      properties:
+        accessToken: { type: string, description: "JWT" }
+        tokenType: { type: string, example: Bearer }
+        expiresIn: { type: integer, example: 3600 }
+      required: [accessToken, tokenType, expiresIn]
+
+    DeviceType:
+      type: string
+      enum: [Sensor, Relay, Switch, Thermostat, Custom]
+
+    DeviceStatus:
+      type: string
+      enum: [New, Active, Suspended, Offline]
+
+    Device:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        homeId: { type: string, format: uuid }
+        name: { type: string }
+        type: { $ref: "#/components/schemas/DeviceType" }
+        status: { $ref: "#/components/schemas/DeviceStatus" }
+        lastSeen: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
+      required: [id, homeId, name, type, status, createdAt]
+
+    CreateDeviceRequest:
+      type: object
+      properties:
+        homeId: { type: string, format: uuid }
+        name: { type: string }
+        type: { $ref: "#/components/schemas/DeviceType" }
+      required: [homeId, name, type]
+
+    DeviceCredentialsPublic:
+      type: object
+      description: Публичные MQTT-реквизиты для конфигурации девайса
+      properties:
+        mqttHost: { type: string, example: mqtt.smarthome.local }
+        mqttPort: { type: integer, example: 8883 }
+        tls: { type: boolean, example: true }
+        username: { type: string }
+        password: { type: string, description: "может быть показан только при выдаче/ротации" }
+        pubTopic: { type: string }
+        subTopic: { type: string }
+      required: [mqttHost, mqttPort, tls, username, pubTopic, subTopic]
+
+    ClaimStartResponse:
+      type: object
+      properties:
+        deviceId: { type: string, format: uuid }
+        claimCode: { type: string, description: "одноразовый код привязки" }
+        expiresAt: { type: string, format: date-time }
+      required: [deviceId, claimCode, expiresAt]
+
+    ClaimCompleteRequest:
+      type: object
+      properties:
+        claimCode: { type: string }
+      required: [claimCode]
+
+    RotateCredentialsResponse:
+      allOf:
+        - $ref: "#/components/schemas/DeviceCredentialsPublic"
+
+    CommandRequest:
+      type: object
+      properties:
+        name: { type: string, example: "set_relay" }
+        payload:
+          type: object
+          additionalProperties: true
+          example: { state: "on", durationSec: 60 }
+      required: [name]
+    CommandStatus:
+      type: string
+      enum: [Pending, Sent, Delivered, Failed, Expired]
+    CommandResponse:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        deviceId: { type: string, format: uuid }
+        name: { type: string }
+        payload:
+          type: object
+          additionalProperties: true
+        status: { $ref: "#/components/schemas/CommandStatus" }
+        createdAt: { type: string, format: date-time }
+      required: [id, deviceId, name, status, createdAt]
+
+    TelemetryPoint:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        deviceId: { type: string, format: uuid }
+        metric: { type: string, example: temperature }
+        value: { type: number, format: double, example: 22.7 }
+        ts: { type: string, format: date-time }
+        tags:
+          type: object
+          additionalProperties: { type: string }
+      required: [id, deviceId, metric, value, ts]
+
+    PageMeta:
+      type: object
+      properties:
+        next: { type: string, nullable: true, description: "cursor/offset token" }
+        limit: { type: integer }
+      required: [limit]
+
+paths:
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Выдача JWT токена
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UserLoginRequest" }
+            examples:
+              demo:
+                value: { email: "user@example.com", password: "secret" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TokenResponse" }
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Problem" }
+
+  /devices:
+    get:
+      tags: [Devices]
+      summary: Список устройств пользователя/дома
+      parameters:
+        - in: query
+          name: homeId
+          schema: { type: string, format: uuid }
+          required: false
+        - in: query
+          name: limit
+          schema: { type: integer, default: 50, minimum: 1, maximum: 200 }
+        - in: query
+          name: cursor
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Device" }
+                  page:
+                    $ref: "#/components/schemas/PageMeta"
+    post:
+      tags: [Devices]
+      summary: Создать устройство (старт онбординга)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateDeviceRequest" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Device" }
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Problem" }
+
+  /devices/{deviceId}:
+    get:
+      tags: [Devices]
+      summary: Получить устройство
+      parameters:
+        - in: path
+          name: deviceId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Device" }
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Problem" }
+
+  /devices/{deviceId}/claim/start:
+    post:
+      tags: [Devices]
+      summary: Сгенерировать одноразовый claim-код
+      parameters:
+        - in: path
+          name: deviceId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Claim code issued
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ClaimStartResponse" }
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Problem" }
+
+  /devices/{deviceId}/claim/complete:
+    post:
+      tags: [Devices]
+      summary: Завершить привязку устройства по claim-коду и выдать MQTT-реквизиты
+      parameters:
+        - in: path
+          name: deviceId
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ClaimCompleteRequest" }
+      responses:
+        "200":
+          description: MQTT credentials issued
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DeviceCredentialsPublic" }
+        "400":
+          description: Invalid claim
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Problem" }
+
+  /devices/{deviceId}/credentials/rotate:
+    post:
+      tags: [Devices]
+      summary: Ротация MQTT пароля (показывается только один раз)
+      security:
+        - BearerAuth: []
+        - IdempotencyKey: []
+      parameters:
+        - in: path
+          name: deviceId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: New credentials
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RotateCredentialsResponse" }
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Problem" }
+
+  /devices/{deviceId}/commands:
+    post:
+      tags: [Commands]
+      summary: Отправить команду устройству (MQTT publish)
+      security:
+        - BearerAuth: []
+        - IdempotencyKey: []
+      parameters:
+        - in: path
+          name: deviceId
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CommandRequest" }
+            examples:
+              relayOn:
+                value: { name: "set_relay", payload: { state: "on", durationSec: 60 } }
+      responses:
+        "202":
+          description: Accepted
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CommandResponse" }
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Problem" }
+
+  /devices/{deviceId}/telemetry:
+    get:
+      tags: [Telemetry]
+      summary: Читать телеметрию устройства
+      parameters:
+        - in: path
+          name: deviceId
+          required: true
+          schema: { type: string, format: uuid }
+        - in: query
+          name: metric
+          required: false
+          schema: { type: string }
+        - in: query
+          name: from
+          required: false
+          schema: { type: string, format: date-time }
+        - in: query
+          name: to
+          required: false
+          schema: { type: string, format: date-time }
+        - in: query
+          name: limit
+          schema: { type: integer, default: 500, minimum: 1, maximum: 5000 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/TelemetryPoint" }
+                  page:
+                    $ref: "#/components/schemas/PageMeta"
